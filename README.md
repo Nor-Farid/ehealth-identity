@@ -1,10 +1,10 @@
-# 🏥 EHealth Identity — Decentralized Identity Management
+## EHealth Identity — Decentralized Identity Management
 
 A blockchain-based identity system for e-health applications built on Ethereum (Sepolia Testnet).
 
 ---
 
-## ⚙️ Requirements
+## Requirements
 
 Make sure you have these installed before starting:
 
@@ -14,7 +14,7 @@ Make sure you have these installed before starting:
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 **1. Clone the repo**
 ```bash
@@ -39,7 +39,7 @@ npx hardhat coverage
 
 ---
 
-## 💻 Run a Local Demo (No Internet Needed)
+## Run a Local Demo (No Internet Needed)
 
 Open **two** PowerShell/terminal windows:
 
@@ -57,7 +57,7 @@ npx hardhat run scripts/deploy.js --network localhost
 
 ---
 
-## 🌐 Deploy to Sepolia Testnet
+## Deploy to Sepolia Testnet
 
 **1. Create a `.env` file** in the project root:
 ```
@@ -82,7 +82,7 @@ npx hardhat verify --network sepolia YOUR_CONTRACT_ADDRESS
 
 ---
 
-## 🦊 MetaMask Network Setup
+## MetaMask Network Setup
 
 | Field | Hardhat Local | Sepolia Testnet |
 |-------|--------------|-----------------|
@@ -92,7 +92,7 @@ npx hardhat verify --network sepolia YOUR_CONTRACT_ADDRESS
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 ehealth-identity/
@@ -113,7 +113,7 @@ ehealth-identity/
 
 ---
 
-## 🔄 Git Workflow
+## Git Workflow
 
 ```bash
 # Before starting work — get latest changes
@@ -127,7 +127,7 @@ git push
 
 ---
 
-## ⚠️ Important
+## Important
 
 - **Never share or commit your `.env` file** — it contains your private key
 - **Never run `npm audit fix --force`** — it will break dependencies
@@ -135,7 +135,7 @@ git push
 
 ---
 
-## ❓ Common Errors
+## Common Errors
 
 | Error | Fix |
 |-------|-----|
