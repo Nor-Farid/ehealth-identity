@@ -13,5 +13,9 @@ module.exports = {
       url: process.env.SEPOLIA_RPC_URL || "",
       accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
     },
-  },
+  }
+  /*localhost: {
+      url: "http://127.0.0.1:5173",
+      chainId: 31337 // <-- Add this line inside the localhost network block too!
+    }*/
 };

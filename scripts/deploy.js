@@ -14,16 +14,16 @@ async function main() {
   console.log(`Deployer  : ${deployer.address}`);
 
   const balance = await hre.ethers.provider.getBalance(deployer.address);
-  console.log(`Balance   : ${hre.ethers.formatEther(balance)} ETH`);
+  console.log(`Balance   : ${hre.ethers.utils.formatEther(balance)} ETH`);
   console.log("-------------------------------------------");
 
   // Deploy
   console.log("\n[1/3] Deploying EHealthIdentity contract...");
   const EHealthIdentity = await hre.ethers.getContractFactory("EHealthIdentity");
   const contract = await EHealthIdentity.deploy();
-  await contract.waitForDeployment();
+  await contract.deployed();
 
-  const contractAddress = await contract.getAddress();
+  const contractAddress = await contract.address;
   console.log(`✓ Contract deployed at: ${contractAddress}`);
 
   // Post-deploy verification
