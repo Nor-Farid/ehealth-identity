@@ -3,10 +3,10 @@ import { ethers } from "ethers";
 import CONTRACT_ABI from "./EHealthIdentity_ABI.json"; 
 
 // Change this to your deployed contract address
-const CONTRACT_ADDRESS = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+const CONTRACT_ADDRESS = "0x3b9877cf1Af43755aEF91A1a3B9415229Eae41d0"; //"0x5FbDB2315678afecb367f032d93F642f64180aa3";
 // Change this to your network's chain ID
 // Hardhat: 31337, Sepolia: 11155111
-const SEPOLIA_CHAIN_ID = 31337; 
+const SEPOLIA_CHAIN_ID = 11155111; 
 
 // Role Hashes
 const ADMIN_ROLE    = "0xa49807205ce4d355092ef5a8a18f56e8913cf4a201fbe287825b095693c21775"; // keccak256("ADMIN_ROLE")

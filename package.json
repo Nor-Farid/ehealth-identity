@@ -16,6 +16,7 @@
     "@nomicfoundation/hardhat-chai-matchers": "^3.0.0",
     "@nomicfoundation/hardhat-network-helpers": "^3.0.10",
     "@nomiclabs/hardhat-ethers": "^2.2.3",
+    "@nomiclabs/hardhat-etherscan": "^3.1.8",
     "@openzeppelin/contracts": "^4.9.6",
     "@vitejs/plugin-react": "^6.0.2",
     "chai": "^4.4.1",
