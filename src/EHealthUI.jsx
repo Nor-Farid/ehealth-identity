@@ -12,6 +12,8 @@ const SEPOLIA_CHAIN_ID = 11155111;
 const ADMIN_ROLE    = "0xa49807205ce4d355092ef5a8a18f56e8913cf4a201fbe287825b095693c21775"; // keccak256("ADMIN_ROLE")
 const VERIFIER_ROLE = "0x0ce23c3e399818cfee81a7ab0880f714e53d7672b08df0fa62f2843416e1ea09"; // keccak256("VERIFIER_ROLE")
 
+const IPFS_GATEWAY = "https://gateway.pinata.cloud/ipfs/";
+
 export default function EHealthUI() {
   // Global App States
   const [account, setAccount] = useState("");
@@ -21,20 +23,26 @@ export default function EHealthUI() {
   const [searchAddress, setSearchAddress] = useState("");
   const [searchDID, setSearchDID] = useState("");
   const [newHash, setNewHash] = useState("");
+  const [newHashFile, setNewHashFile] = useState(null);
   const [stats, setStats] = useState(null);
 
   // Form Entry States
   const [registerForm, setRegisterForm] = useState({ 
     fullName: "", 
-    bloodType: "" 
+    bloodType: "",
+    dataHash: "",
+    recordFile: null
   });
   const [verifyAddress, setVerifyAddress] = useState("");
   const [credentialForm, setCredentialForm] = useState({ 
     patientAddress: "", 
     type: "Vaccination", 
-    documentHash: "", 
+    documentHash: "",
+    documentFile: null,
     expiry: "" });
   const [newVerifierAddress, setNewVerifierAddress] = useState("");
+  const [uploadingToIPFS, setUploadingToIPFS] = useState(false);
+  const [ipfsStatus, setIpfsStatus] = useState("");
 
   // Blockchain Core Struct Data States
   const [identity, setIdentity] = useState(null);
@@ -58,6 +66,91 @@ export default function EHealthUI() {
       return new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
     }
     return new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider);
+  };
+
+  const buildIPFSUrl = (cid) => (cid ? `${IPFS_GATEWAY}${cid}` : "");
+
+  const uploadFileToIPFS = async (file) => {
+    if (!file) throw new Error("Please select a file first.");
+
+    const jwt = import.meta.env.VITE_PINATA_JWT;
+    const apiKey = import.meta.env.VITE_PINATA_API_KEY;
+    const secretKey = import.meta.env.VITE_PINATA_SECRET_KEY;
+
+    if (!jwt && (!apiKey || !secretKey)) {
+      throw new Error(
+        "IPFS upload is not configured. Set VITE_PINATA_JWT or VITE_PINATA_API_KEY + VITE_PINATA_SECRET_KEY."
+      );
+    }
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const headers = jwt
+      ? { Authorization: `Bearer ${jwt}` }
+      : {
+          pinata_api_key: apiKey,
+          pinata_secret_api_key: secretKey,
+        };
+
+    const response = await fetch("https://api.pinata.cloud/pinning/pinFileToIPFS", {
+      method: "POST",
+      headers,
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || "Failed to upload file to IPFS.");
+    }
+
+    const data = await response.json();
+    if (!data.IpfsHash) {
+      throw new Error("Upload response did not contain an IPFS hash.");
+    }
+
+    return data.IpfsHash;
+  };
+
+  const uploadSelectedFile = async (kind) => {
+    let selectedFile = null;
+
+    if (kind === "record") {
+      selectedFile = registerForm.recordFile;
+    } else if (kind === "credential") {
+      selectedFile = credentialForm.documentFile;
+    } else if (kind === "update") {
+      selectedFile = newHashFile;
+    }
+
+    if (!selectedFile) {
+      alert(
+        kind === "update"
+          ? "Please choose a file to upload for the updated health record."
+          : `Please choose a file to upload for the ${kind === "record" ? "health record" : "credential"}.`
+      );
+      return;
+    }
+
+    try {
+      setUploadingToIPFS(true);
+      setIpfsStatus(`Uploading ${selectedFile.name} to IPFS...`);
+      const cid = await uploadFileToIPFS(selectedFile);
+      if (kind === "record") {
+        setRegisterForm((prev) => ({ ...prev, dataHash: cid }));
+      } else if (kind === "credential") {
+        setCredentialForm((prev) => ({ ...prev, documentHash: cid }));
+      } else if (kind === "update") {
+        setNewHash(cid);
+      }
+      setIpfsStatus(`Upload complete. IPFS CID: ${cid}`);
+    } catch (err) {
+      console.error(err);
+      alert(err.message || "Upload failed.");
+      setIpfsStatus("");
+    } finally {
+      setUploadingToIPFS(false);
+    }
   };
 
   // Connect Metamask
@@ -86,12 +179,15 @@ export default function EHealthUI() {
   };
 
   // Fetch Global Stats (Total Registered & Verified Identities)
-  const fetchStats = useCallback(async () => {
+  const fetchStats = useCallback(async (contract = null) => {
     try {
-      const [registered, verified] = await contractInstance.getStats();
-      setStats({ 
-        registered: registered.toNumber(), 
-        verified: verified.toNumber() });
+      const statsContract = contract || (await getContractInstance(false));
+      if (!statsContract) return;
+      const [registered, verified] = await statsContract.getStats();
+      setStats({
+        registered: registered.toNumber(),
+        verified: verified.toNumber(),
+      });
     } catch (e) {
       console.error("Error fetching stats:", e);
     }
@@ -267,25 +363,26 @@ export default function EHealthUI() {
   const handleRegister = async (e) => {
     e.preventDefault();
 
-    /*if (!registerForm.dataHash.trim()) {
-      alert("Please provide a valid IPFS hash for your health records.");
+    if (!registerForm.dataHash.trim()) {
+      alert("Please upload a file or paste an IPFS CID for your health record.");
       return;
-    }*/
+    }
 
     const contract = await getContractInstance(true);
     if (!contract) return;
     try {
       setLoading(true);
-      const did = `did:ehealth:${account.toLowerCase()}`;      
+      const did = `did:ehealth:${account.toLowerCase()}`;
       const tx = await contract.registerIdentity(
-        did, 
-        registerForm.dataHash, 
-        registerForm.fullName, 
+        did,
+        registerForm.dataHash,
+        registerForm.fullName,
         registerForm.bloodType
       );
       await tx.wait();
       alert("Identity registered successfully!");
-      setRegisterForm({ fullName: "", bloodType: "", dataHash: "" });
+      setRegisterForm({ fullName: "", bloodType: "", dataHash: "", recordFile: null });
+      setIpfsStatus("");
     } catch (err) {
       handleContractError(err);
     } finally {
@@ -414,10 +511,10 @@ export default function EHealthUI() {
   const handleIssueCredential = async (e) => {
     e.preventDefault();
 
-    /*if (!credentialForm.documentHash.trim()) {
-      alert("Please provide a valid IPFS hash for the credential document.");
+    if (!credentialForm.documentHash.trim()) {
+      alert("Please upload a file or paste an IPFS CID for the credential document.");
       return;
-    }*/
+    }
 
     let expiresAt = 0;
     if (credentialForm.expiry) {
@@ -438,7 +535,8 @@ export default function EHealthUI() {
       alert(`Secure ${credentialForm.type} credential issued successfully!`);
       setSearchAddress(credentialForm.patientAddress);
       searchAddressRef.current = credentialForm.patientAddress;
-      setCredentialForm({ patientAddress: "", type: "Vaccination", documentHash: "", expiry: "" });
+      setCredentialForm({ patientAddress: "", type: "Vaccination", documentHash: "", documentFile: null, expiry: "" });
+      setIpfsStatus("");
     } catch (err) {
       handleContractError(err);
     } finally {
@@ -608,12 +706,32 @@ export default function EHealthUI() {
                   </select>
                   <input
                     type="text"
-                    placeholder="Document Reference Pointer (e.g., MOCK_PRESCRIPTION_REF_99)"
+                    placeholder="IPFS CID for the document"
                     required
                     value={credentialForm.documentHash}
                     onChange={e => setCredentialForm({ ...credentialForm, documentHash: e.target.value })}
                     style={{ padding: "0.6rem", borderRadius: "4px", border: "1px solid #ccc" }}
                   />
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                    <input
+                      type="file"
+                      onChange={(e) => setCredentialForm({ ...credentialForm, documentFile: e.target.files?.[0] || null })}
+                      style={{ fontSize: "0.8rem" }}
+                    />
+                    <button
+                      type="button"
+                      disabled={uploadingToIPFS}
+                      onClick={() => uploadSelectedFile("credential")}
+                      style={{ padding: "0.5rem", background: "#0f766e", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold" }}
+                    >
+                      {uploadingToIPFS ? "Uploading..." : "Upload Credential File to IPFS"}
+                    </button>
+                  </div>
+                  {ipfsStatus && (
+                    <small style={{ color: "#0f766e", fontSize: "0.75rem" }}>
+                      {ipfsStatus}
+                    </small>
+                  )}
                   <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
                     <label style={{ fontSize: "0.8rem", color: "#555" }}>Expiry Date (leave blank for no expiry)</label>
                     <input
@@ -689,7 +807,17 @@ export default function EHealthUI() {
                     <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", fontSize: "0.9rem" }}>
                       <p style={{ margin: 0 }}><strong>Name:</strong> {identity.fullName}</p>
                       <p style={{ margin: 0 }}><strong>Blood Type:</strong> {identity.bloodType}</p>
-                      <p style={{ margin: 0 }}><strong>Record Hash:</strong> {identity.dataHash}</p>
+                      <p style={{ margin: 0 }}>
+                        <strong>Record Hash:</strong>{" "}
+                        <a
+                          href={buildIPFSUrl(identity.dataHash)}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ color: "#1d4ed8", wordBreak: "break-all" }}
+                        >
+                          {identity.dataHash}
+                        </a>
+                      </p>
                       <p style={{ margin: 0, fontSize: "0.8rem" }}>
                         <strong>DID:</strong>
                         <code style={{ background: "#fff", padding: "4px", borderRadius: "4px", fontSize: "0.75rem", display: "block", marginTop: "4px", border: "1px solid #bfdbfe", overflowX: "auto" }}>
@@ -706,15 +834,30 @@ export default function EHealthUI() {
                       <>
                         <form onSubmit={handleUpdateHash} style={{ marginTop: "1.5rem", display: "flex", flexDirection: "column", gap: "0.5rem", borderTop: "1px dashed #bfdbfe", paddingTop: "1rem" }}>
                           <label style={{ fontSize: "0.75rem", fontWeight: "bold", color: "#1e40af" }}>Update Health Record Hash</label>
-                          <div style={{ display: "flex", gap: "0.5rem" }}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
                             <input
                               type="text"
-                              placeholder="New IPFS hash (Qm…)"
+                              placeholder="New IPFS CID (Qm…)"
                               required
                               value={newHash}
                               onChange={e => setNewHash(e.target.value)}
                               style={{ flex: 1, padding: "0.4rem", borderRadius: "4px", border: "1px solid #bfdbfe", fontSize: "0.8rem" }}
                             />
+                            <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                              <input
+                                type="file"
+                                onChange={(e) => setNewHashFile(e.target.files?.[0] || null)}
+                                style={{ fontSize: "0.8rem" }}
+                              />
+                              <button
+                                type="button"
+                                disabled={uploadingToIPFS}
+                                onClick={() => uploadSelectedFile("update")}
+                                style={{ padding: "0.4rem 0.8rem", background: "#0f766e", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "0.8rem", fontWeight: "bold" }}
+                              >
+                                {uploadingToIPFS ? "Uploading..." : "Upload New File to IPFS"}
+                              </button>
+                            </div>
                             <button type="submit" disabled={loading} style={{ padding: "0.4rem 0.8rem", background: "#3b82f6", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "0.8rem", fontWeight: "bold" }}>
                               Update
                             </button>
@@ -752,16 +895,35 @@ export default function EHealthUI() {
                       />
                       <input
                         type="text"
-                        placeholder="Health Record Reference Key (e.g., MOCK_HASH_ALICE_01)"
+                        placeholder="IPFS CID (Qm... ) or existing hash"
                         required
                         value={registerForm.dataHash}
                         onChange={e => setRegisterForm({ ...registerForm, dataHash: e.target.value })}
                         style={{ padding: "0.5rem", borderRadius: "4px", border: "1px solid #cbd5e1" }}
                       />
-                      {/*
+                      <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                        <input
+                          type="file"
+                          onChange={(e) => setRegisterForm({ ...registerForm, recordFile: e.target.files?.[0] || null })}
+                          style={{ fontSize: "0.8rem" }}
+                        />
+                        <button
+                          type="button"
+                          disabled={uploadingToIPFS}
+                          onClick={() => uploadSelectedFile("record")}
+                          style={{ padding: "0.5rem", background: "#0f766e", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold" }}
+                        >
+                          {uploadingToIPFS ? "Uploading..." : "Upload Record to IPFS"}
+                        </button>
+                      </div>
+                      {ipfsStatus && (
+                        <small style={{ color: "#0f766e", fontSize: "0.75rem" }}>
+                          {ipfsStatus}
+                        </small>
+                      )}
                       <small style={{ color: "#64748b", fontSize: "0.75rem" }}>
-                        <strong>Demo Mode Active:</strong> Paste a custom text tag above (e.g., <code>FILE_REF_01</code>) to simulate an off-chain data pointer on the Sepolia network.
-                      </small>*/}
+                        <strong>IPFS tip:</strong> Upload a file here to get a CID, or paste a CID manually if you already have one.
+                      </small>
                       <button type="submit" disabled={loading} style={{ padding: "0.6rem", background: "#2563eb", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold" }}>
                         Register New Patient
                       </button>
