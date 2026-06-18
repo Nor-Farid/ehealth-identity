@@ -1,16 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { ethers } from "ethers";
-import CONTRACT_ABI from "./EHealthIdentity_ABI.json"; 
+import { PinataSDK } from "pinata-web3";
 
-// Change this to your deployed contract address
-const CONTRACT_ADDRESS = "0x3b9877cf1Af43755aEF91A1a3B9415229Eae41d0"; //"0x5FbDB2315678afecb367f032d93F642f64180aa3";
-// Change this to your network's chain ID
-// Hardhat: 31337, Sepolia: 11155111
-const SEPOLIA_CHAIN_ID = 11155111; 
-
-// Role Hashes
-const ADMIN_ROLE    = "0xa49807205ce4d355092ef5a8a18f56e8913cf4a201fbe287825b095693c21775"; // keccak256("ADMIN_ROLE")
-const VERIFIER_ROLE = "0x0ce23c3e399818cfee81a7ab0880f714e53d7672b08df0fa62f2843416e1ea09"; // keccak256("VERIFIER_ROLE")
+import {
+  CONTRACT_ADDRESS,
+  SEPOLIA_CHAIN_ID,
+  ADMIN_ROLE,
+  VERIFIER_ROLE,
+  CONTRACT_ABI
+} from "./config/contract";
 
 export default function EHealthUI() {
   // Global App States
@@ -22,6 +20,9 @@ export default function EHealthUI() {
   const [searchDID, setSearchDID] = useState("");
   const [newHash, setNewHash] = useState("");
   const [stats, setStats] = useState(null);
+  const [patientFile, setPatientFile] = useState(null);
+  const [credentialFile, setCredentialFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
 
   // Form Entry States
   const [registerForm, setRegisterForm] = useState({ 
@@ -33,7 +34,8 @@ export default function EHealthUI() {
     patientAddress: "", 
     type: "Vaccination", 
     documentHash: "", 
-    expiry: "" });
+    expiry: "" 
+  });
   const [newVerifierAddress, setNewVerifierAddress] = useState("");
 
   // Blockchain Core Struct Data States
@@ -49,6 +51,82 @@ export default function EHealthUI() {
     searchAddressRef.current = searchAddress;
   }, [searchAddress]);
 
+  // Pinata IPFS Initialization (SDK Fallback)
+  const pinata = new PinataSDK({
+    pinataJwt: "YOUR_PINATA_JWT",
+    pinataGateway: "aquamarine-frequent-capybara-310.mypinata.cloud",
+  });
+
+  // Reusable Frontend Browser CORS Compliant Upload Pipeline
+  const uploadToIPFS = async (file) => {
+    if (!file) return null;
+    try {
+      setUploading(true);
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const pinataMetadata = JSON.stringify({
+        name: file.name,
+      });
+      formData.append("pinataMetadata", pinataMetadata);
+
+      const pinataOptions = JSON.stringify({
+        cidVersion: 0,
+      });
+      formData.append("pinataOptions", pinataOptions);
+
+      // Uses standard pinning endpoint to execute client-side front-end uploads smoothly
+      const response = await fetch("https://api.pinata.cloud/pinning/pinFileToIPFS", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${import.meta.env.VITE_PINATA_JWT}`,
+        },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Pinata Server Rejection Payload:", errorText);
+        throw new Error(`HTTP Error ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data.IpfsHash;
+    } catch (error) {
+      console.error("IPFS Upload Error Stack:", error);
+      alert("Failed to upload document to IPFS. Please verify your environment variables.");
+      return null;
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // Reusable File Validation Handler (Type & Size Restrictions)
+  const handleFileValidation = (file, fileInputEventTarget) => {
+    if (!file) return null;
+    
+    // Allowed Mime Types/Extensions Check
+    const allowedExtensions = ["pdf", "png", "jpg", "jpeg"];
+    const fileExtension = file.name.split(".").pop().toLowerCase();
+    
+    if (!allowedExtensions.includes(fileExtension)) {
+      alert("Invalid file type! Only PDF, PNG, JPG, and JPEG files are allowed.");
+      fileInputEventTarget.value = ""; // Reset file selection input field
+      return null;
+    }
+
+    // 5MB Size Validation (5 * 1024 * 1024 bytes)
+    const maxSize = 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+      alert("File is too large! Please upload a document smaller than 5MB.");
+      fileInputEventTarget.value = ""; // Reset file selection input field
+      return null;
+    }
+
+    return file;
+  };
+
   // Setup Contract Instance
   const getContractInstance = async (useSigner = false) => {
     if (!window.ethereum) return null;
@@ -59,6 +137,21 @@ export default function EHealthUI() {
     }
     return new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider);
   };
+
+  // Fetch Global Stats
+  const fetchStats = useCallback(async (contractInstance) => {
+    try {
+      const activeContract = contractInstance || contractRef.current;
+      if (!activeContract) return;
+      const [registered, verified] = await activeContract.getStats();
+      setStats({ 
+        registered: registered.toNumber(), 
+        verified: verified.toNumber() 
+      });
+    } catch (e) {
+      console.error("Error fetching stats:", e);
+    }
+  }, []);
 
   // Connect Metamask
   const connectWallet = async () => {
@@ -85,21 +178,10 @@ export default function EHealthUI() {
     }
   };
 
-  // Fetch Global Stats (Total Registered & Verified Identities)
-  const fetchStats = useCallback(async () => {
-    try {
-      const [registered, verified] = await contractInstance.getStats();
-      setStats({ 
-        registered: registered.toNumber(), 
-        verified: verified.toNumber() });
-    } catch (e) {
-      console.error("Error fetching stats:", e);
-    }
-  }, []);
-
   // Check Role and Fetch Data
   const checkRoleAndFetchData = async (userAddress, provider) => {
     const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider);
+    contractRef.current = contract;
     try {
       const hasAdmin = await contract.hasRole(ADMIN_ROLE, userAddress);
       const hasVerifier = await contract.hasRole(VERIFIER_ROLE, userAddress);
@@ -110,6 +192,7 @@ export default function EHealthUI() {
       console.error("Error evaluating RBAC roles:", e);
     }
     await fetchPatientData(userAddress, contract);
+    await fetchStats(contract);
   };
 
   // Reusable core data-fetcher logic
@@ -120,7 +203,7 @@ export default function EHealthUI() {
         setLookupStatus("invalid");
         setIdentity(null);
         setCredentials([]);
-    }
+      }
       return;
     }
     try {
@@ -154,8 +237,8 @@ export default function EHealthUI() {
           credentialHash: c.credentialHash,
           issuedAt: new Date(Number(c.issuedAt) * 1000).toLocaleDateString(),
           expiresAt: Number(c.expiresAt) === 0 
-          ? "No Expiry" : new Date(Number(c.expiresAt) * 1000).toLocaleDateString(),
-          isExpired: Number(c.expiresAt) !== 0 && Number (c.expiresAt) * 1000 < Date.now()
+            ? "No Expiry" : new Date(Number(c.expiresAt) * 1000).toLocaleDateString(),
+          isExpired: Number(c.expiresAt) !== 0 && Number(c.expiresAt) * 1000 < Date.now()
         })));
 
         if (isExplicitSearch) {
@@ -239,7 +322,7 @@ export default function EHealthUI() {
         console.error("Error removing listeners:", e);
       }
     };
-  }, [account]);
+  }, [account, fetchStats]);
 
   // Error handling helper for contract interactions
   const handleContractError = (error) => {
@@ -267,25 +350,43 @@ export default function EHealthUI() {
   const handleRegister = async (e) => {
     e.preventDefault();
 
-    /*if (!registerForm.dataHash.trim()) {
-      alert("Please provide a valid IPFS hash for your health records.");
-      return;
-    }*/
-
     const contract = await getContractInstance(true);
     if (!contract) return;
+
     try {
       setLoading(true);
+      let cid = "";
+
+      if (patientFile) {
+        cid = await uploadToIPFS(patientFile);
+      } else {
+        const emptyHistoryBlob = new Blob(
+          [JSON.stringify({ 
+            status: "Initial Registration Profile", 
+            created: new Date().toISOString(),
+            notes: "No prior medical history submitted during account initialization." 
+          }, null, 2)],
+          { type: "application/json" }
+        );
+
+        const defaultFile = new File([emptyHistoryBlob], "init_profile.json", { type: "application/json" });
+        cid = await uploadToIPFS(defaultFile);
+      }
+
+      if (!cid) return;
+
       const did = `did:ehealth:${account.toLowerCase()}`;      
       const tx = await contract.registerIdentity(
-        did, 
-        registerForm.dataHash, 
+        did,
+        cid,  
         registerForm.fullName, 
         registerForm.bloodType
       );
       await tx.wait();
+
       alert("Identity registered successfully!");
-      setRegisterForm({ fullName: "", bloodType: "", dataHash: "" });
+      setRegisterForm({ fullName: "", bloodType: ""});
+      setPatientFile(null);
     } catch (err) {
       handleContractError(err);
     } finally {
@@ -335,9 +436,6 @@ export default function EHealthUI() {
     e.preventDefault();
     
     const targetAddress = searchAddress.trim();
-    /*if (!ethers.utils.isAddress(searchAddress) || searchAddress === ethers.constants.AddressZero) {
-      return alert("Please enter a valid wallet address to search.");
-    }*/
     if (!ethers.utils.isAddress(targetAddress) || targetAddress === ethers.constants.AddressZero) {
       alert("Please enter a valid wallet address to search.");
       return;
@@ -354,8 +452,7 @@ export default function EHealthUI() {
       setSearchAddress(targetAddress);
 
       await fetchPatientData(targetAddress, contract, true);
-      setSearchAddress("")
-
+      setSearchAddress("");
     } catch (err) {
       handleContractError(err);
     } finally {
@@ -366,19 +463,16 @@ export default function EHealthUI() {
   // 🟢 GENERAL Actions: DID Search Lookup
   const handleDIDResolve = async (e) => {
     e.preventDefault();
-    /*if (!searchDID) {
-      return alert("Please enter a valid DID to resolve.");
-    }*/
+    if (!searchDID.trim()) return alert("Please enter a valid DID.");
     const contract = await getContractInstance(false);
     if (!contract) return;
     try {
       setLoading(true);
-      const resolvedAddress = await contract.resolveDID(searchDID);
+      const resolvedAddress = await contract.resolveDID(searchDID.trim());
       if (resolvedAddress === ethers.constants.AddressZero) {
         alert("This DID does not resolve to any active identity.");
         return;
       }
-      setSearchAddress(resolvedAddress);
       searchAddressRef.current = resolvedAddress;
       setLookupStatus(null);
       await fetchPatientData(resolvedAddress, contract, true);
@@ -414,11 +508,6 @@ export default function EHealthUI() {
   const handleIssueCredential = async (e) => {
     e.preventDefault();
 
-    /*if (!credentialForm.documentHash.trim()) {
-      alert("Please provide a valid IPFS hash for the credential document.");
-      return;
-    }*/
-
     let expiresAt = 0;
     if (credentialForm.expiry) {
       const ts = Math.floor(new Date(credentialForm.expiry).getTime() / 1000);
@@ -433,12 +522,38 @@ export default function EHealthUI() {
     if (!contract) return;
     try {
       setLoading(true);
-      const tx = await contract.issueCredential(credentialForm.patientAddress, credentialForm.type, credentialForm.documentHash, expiresAt);
+      let cid = "";
+
+      if (credentialFile) {
+        cid = await uploadToIPFS(credentialFile);
+      } else {
+        const fallbackCredBlob = new Blob(
+          [JSON.stringify({
+            status: "Standard Log Attestation",
+            type: credentialForm.type,
+            patient: credentialForm.patientAddress,
+            issuedBy: account,
+            timestamp: new Date().toISOString(),
+            details: `A digital validation record of type ${credentialForm.type} was approved by authorized clinic metadata logging.`
+          }, null, 2)],
+          { type: "application/json" }
+        );
+        const fallbackFile = new File([fallbackCredBlob], "medical_attestation.json", { type: "application/json" });
+        cid = await uploadToIPFS(fallbackFile);
+      }
+
+      if (!cid) return;
+
+      const tx = await contract.issueCredential(
+        credentialForm.patientAddress, 
+        credentialForm.type, 
+        cid, 
+        expiresAt
+      );
       await tx.wait();
       alert(`Secure ${credentialForm.type} credential issued successfully!`);
-      setSearchAddress(credentialForm.patientAddress);
-      searchAddressRef.current = credentialForm.patientAddress;
-      setCredentialForm({ patientAddress: "", type: "Vaccination", documentHash: "", expiry: "" });
+      setCredentialForm({ patientAddress: "", type: "Vaccination", expiry: "" });
+      setCredentialFile(null);
     } catch (err) {
       handleContractError(err);
     } finally {
@@ -496,7 +611,6 @@ export default function EHealthUI() {
           </small>
         </div>
 
-        {/* Role Badge & Stats Display */}
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "0.4rem" }}>
           {account && (
             <span style={{
@@ -518,7 +632,6 @@ export default function EHealthUI() {
         </div>
       </header>
  
-      {/* MetaMask Connection */}
       {!account ? (
         <div style={{ textAlign: "center", padding: "3rem", background: "#f8f9fa", borderRadius: "12px", border: "1px dashed #ccc" }}>
           <h2>Welcome to the E-Health Identity Management System</h2>
@@ -532,13 +645,11 @@ export default function EHealthUI() {
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
  
-          {/* System Admin Panel */}
+          {/* Admin Panel */}
           {isAdmin && (
             <div style={{ background: "#fff9e6", padding: "2rem", borderRadius: "12px", boxShadow: "0 4px 12px rgba(0,0,0,0.05)", border: "2px dashed #f5b041" }}>
               <h2 style={{ color: "#b7950b", marginTop: 0 }}>Healthcare Network Administration</h2>
               <p style={{ color: "#555" }}>Authorize or revoke healthcare provider access to the identity network.</p>
-              
-              {/* Grant/Revoke Verifier Form */}
               <form onSubmit={handleGrantVerifier} style={{ display: "flex", gap: "1rem", alignItems: "end" }}>
                 <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "0.5rem" }}>
                   <label style={{ fontSize: "0.85rem", fontWeight: "bold" }}>Healthcare Provider Wallet Address</label>
@@ -570,7 +681,6 @@ export default function EHealthUI() {
               <hr style={{ border: "0.5px solid #eaeaea", margin: "1.5rem 0" }} />
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2rem" }}>
 
-                {/* Verify Patient Identity Form */}
                 <form onSubmit={handleVerify} style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
                   <h3>Verify Patient Identity</h3>
                   <input
@@ -586,7 +696,6 @@ export default function EHealthUI() {
                   </button>
                 </form>
 
-                {/* Issue Medical Credential Form */}
                 <form onSubmit={handleIssueCredential} style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
                   <h3>Issue Medical Credential</h3>
                   <input
@@ -606,14 +715,21 @@ export default function EHealthUI() {
                     <option value="Prescription">Medical Prescription</option>
                     <option value="LabResult">Laboratory Result</option>
                   </select>
-                  <input
-                    type="text"
-                    placeholder="Document Reference Pointer (e.g., MOCK_PRESCRIPTION_REF_99)"
-                    required
-                    value={credentialForm.documentHash}
-                    onChange={e => setCredentialForm({ ...credentialForm, documentHash: e.target.value })}
-                    style={{ padding: "0.6rem", borderRadius: "4px", border: "1px solid #ccc" }}
-                  />
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                    <label style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#137333" }}>Upload Signed Medical Certificate (Optional)</label>
+                    <input
+                      type="file"
+                      // Strict frontend filters for supported file extensions
+                      accept=".pdf, .png, .jpg, .jpeg"
+                      onChange={e => {
+                        const file = e.target.files[0];
+                        const validatedFile = handleFileValidation(file, e.target);
+                        setCredentialFile(validatedFile);
+                      }}
+                      style={{ padding: "0.5rem", borderRadius: "4px", border: "1px solid #ccc", background: "#fff" }}
+                    />
+                    <small style={{ color: "#64748b", fontSize: "0.7rem" }}>Allowed: PDF, PNG, JPG under 5MB</small>
+                  </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
                     <label style={{ fontSize: "0.8rem", color: "#555" }}>Expiry Date (leave blank for no expiry)</label>
                     <input
@@ -623,8 +739,8 @@ export default function EHealthUI() {
                       style={{ padding: "0.6rem", borderRadius: "4px", border: "1px solid #ccc" }}
                     />
                   </div>
-                  <button type="submit" disabled={loading} style={{ padding: "0.6rem", background: "#0f5132", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold" }}>
-                    Sign &amp; Issue Medical Credential
+                  <button type="submit" disabled={loading || uploading} style={{ padding: "0.6rem", background: "#0f5132", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold" }}>
+                    {uploading ? "Uploading to IPFS..." : "Sign & Issue Medical Credential"}
                   </button>
                 </form>
               </div>
@@ -637,31 +753,29 @@ export default function EHealthUI() {
               <h3 style={{ color: "#1e3a8a", margin: 0 }}>Identity Lookup</h3>
               <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
 
-                {/* Search by Wallet Address Form */}
                 <form onSubmit={handleLookup} style={{ display: "flex", gap: "0.5rem" }}>
                   <input
                     type="text"
-                    placeholder="Search by Wallet Address (0x…)"
+                    placeholder="Search Wallet (0x…)"
                     value={searchAddress}
                     onChange={e => setSearchAddress(e.target.value)}
-                    style={{ padding: "0.5rem", fontSize: "0.85rem", borderRadius: "6px", border: "1px solid #cbd5e1", width: "220px" }}
+                    style={{ padding: "0.5rem", fontSize: "0.85rem", borderRadius: "6px", border: "1px solid #cbd5e1", width: "200px" }}
                   />
                   <button type="submit" style={{ padding: "0.5rem 1rem", fontSize: "0.85rem", background: "#3b82f6", color: "white", border: "none", borderRadius: "6px", cursor: "pointer" }}>
                     Search
                   </button>
                 </form>
 
-                {/* Search by DID Form */}
                 <form onSubmit={handleDIDResolve} style={{ display: "flex", gap: "0.5rem" }}>
                   <input
                     type="text"
-                    placeholder="Search by DID (did:ehealth:…)"
+                    placeholder="Search DID (did:ehealth:…)"
                     value={searchDID}
                     onChange={e => setSearchDID(e.target.value)}
-                    style={{ padding: "0.5rem", fontSize: "0.85rem", borderRadius: "6px", border: "1px solid #cbd5e1", width: "240px" }}
+                    style={{ padding: "0.5rem", fontSize: "0.85rem", borderRadius: "6px", border: "1px solid #cbd5e1", width: "220px" }}
                   />
                   <button type="submit" style={{ padding: "0.5rem 1rem", fontSize: "0.85rem", background: "#7c3aed", color: "white", border: "none", borderRadius: "6px", cursor: "pointer" }}>
-                    Search
+                    Resolve
                   </button>
                 </form>
               </div>
@@ -671,7 +785,7 @@ export default function EHealthUI() {
             
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr", gap: "2rem" }}>
  
-              {/* LEFT COLUMN: Identity Profile View or Registration */}
+              {/* LEFT COLUMN: Identity Profile or Registration */}
               <div>
                 {identity ? (
                   <div style={{ border: "2px solid #3b82f6", padding: "1.5rem", borderRadius: "8px", background: "#eff6ff" }}>
@@ -689,7 +803,12 @@ export default function EHealthUI() {
                     <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", fontSize: "0.9rem" }}>
                       <p style={{ margin: 0 }}><strong>Name:</strong> {identity.fullName}</p>
                       <p style={{ margin: 0 }}><strong>Blood Type:</strong> {identity.bloodType}</p>
-                      <p style={{ margin: 0 }}><strong>Record Hash:</strong> {identity.dataHash}</p>
+                      <p style={{ margin: 0 }}>
+                        <strong>Record Hash:</strong>{" "}
+                        <a href={`https://ipfs.io/ipfs/${identity.dataHash}`} target="_blank" rel="noreferrer" style={{ color: "#2563eb", textDecoration: "underline", fontWeight: "bold" }}>
+                          View Document ↗
+                        </a>
+                      </p>
                       <p style={{ margin: 0, fontSize: "0.8rem" }}>
                         <strong>DID:</strong>
                         <code style={{ background: "#fff", padding: "4px", borderRadius: "4px", fontSize: "0.75rem", display: "block", marginTop: "4px", border: "1px solid #bfdbfe", overflowX: "auto" }}>
@@ -701,7 +820,6 @@ export default function EHealthUI() {
                       </p>
                     </div>
  
-                    {/* Deactivate / Delete Identity */}
                     {identity.owner.toLowerCase() === account.toLowerCase() && !isAdmin && !isVerifier && (
                       <>
                         <form onSubmit={handleUpdateHash} style={{ marginTop: "1.5rem", display: "flex", flexDirection: "column", gap: "0.5rem", borderTop: "1px dashed #bfdbfe", paddingTop: "1rem" }}>
@@ -730,7 +848,6 @@ export default function EHealthUI() {
                     )}
                   </div>
                 ) : (
-                  /* Register Patient Identity */
                   !isAdmin && !isVerifier && (
                     <form onSubmit={handleRegister} style={{ display: "flex", flexDirection: "column", gap: "0.75rem", background: "#f8fafc", padding: "1.5rem", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
                       <h4 style={{ margin: 0, color: "#334155" }}>Register New Patient Profile</h4>
@@ -750,26 +867,30 @@ export default function EHealthUI() {
                         onChange={e => setRegisterForm({ ...registerForm, bloodType: e.target.value })}
                         style={{ padding: "0.5rem", borderRadius: "4px", border: "1px solid #cbd5e1" }}
                       />
-                      <input
-                        type="text"
-                        placeholder="Health Record Reference Key (e.g., MOCK_HASH_ALICE_01)"
-                        required
-                        value={registerForm.dataHash}
-                        onChange={e => setRegisterForm({ ...registerForm, dataHash: e.target.value })}
-                        style={{ padding: "0.5rem", borderRadius: "4px", border: "1px solid #cbd5e1" }}
-                      />
-                      {/*
-                      <small style={{ color: "#64748b", fontSize: "0.75rem" }}>
-                        <strong>Demo Mode Active:</strong> Paste a custom text tag above (e.g., <code>FILE_REF_01</code>) to simulate an off-chain data pointer on the Sepolia network.
-                      </small>*/}
-                      <button type="submit" disabled={loading} style={{ padding: "0.6rem", background: "#2563eb", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold" }}>
-                        Register New Patient
+                      <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                        <label style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#334155" }}>Medical History PDF/Doc</label>
+                        <input
+                          type="file"
+                          // Strict frontend filters for supported file extensions
+                          accept=".pdf, .png, .jpg, .jpeg"
+                          onChange={e => {
+                            const file = e.target.files[0];
+                            const validatedFile = handleFileValidation(file, e.target);
+                            setPatientFile(validatedFile);
+                          }}
+                          style={{ padding: "0.5rem", borderRadius: "4px", border: "1px solid #cbd5e1", background: "#fff" }}
+                        />
+                        <small style={{ color: "#64748b", fontSize: "0.7rem" }}>Allowed: PDF, PNG, JPG under 5MB</small>
+                      </div>
+                      <button type="submit" disabled={loading || uploading} style={{ padding: "0.6rem", background: "#2563eb", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold" }}>
+                        {uploading ? "Uploading to IPFS..." : "Register New Patient"}
                       </button>
                     </form>
                   )
                 )}
               </div>
  
+              {/* RIGHT COLUMN: Medical Credentials Display */}
               <div>
                 {(!isAdmin && !isVerifier) || identity ? (
                   <>
@@ -796,10 +917,13 @@ export default function EHealthUI() {
                               )}
                             </div>
                             <div style={{ fontSize: "0.75rem", color: "#475569" }}>
-                              <strong>Issued by:</strong> <code style={{ color: "#059669" }}>{c.verifier}</code>
+                              \ **Issued by:** <code style={{ color: "#059669" }}>{c.verifier}</code>
                             </div>
                             <div style={{ fontSize: "0.75rem", color: "#475569", marginTop: "0.2rem" }}>
-                              <strong>Document Hash:</strong> <code style={{ fontSize: "0.7rem" }}>{c.credentialHash || "—"}</code>
+                              <strong>Document Hash:</strong>{" "}
+                              <a href={`https://ipfs.io/ipfs/${c.credentialHash}`} target="_blank" rel="noreferrer" style={{ color: "#059669", fontWeight: "bold", textDecoration: "underline" }}>
+                                Open Secure Link ↗
+                              </a>
                             </div>
                             <div style={{ fontSize: "0.75rem", color: "#94a3b8", marginTop: "0.25rem" }}>
                               Issued: {c.issuedAt} · Expires: {c.expiresAt}

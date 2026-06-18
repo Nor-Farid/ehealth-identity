@@ -63,7 +63,7 @@ The UI is configured for the default first Hardhat deployment address:
 0x5FbDB2315678afecb367f032d93F642f64180aa3
 ```
 
-If your deploy output shows a different contract address, update `CONTRACT_ADDRESS` near the top of `src/EHealthUI.jsx`.
+If your terminal outputs a different deployment string, update `CONTRACT_ADDRESS` inside `src/config/contract.js`.
 
 **Terminal 3 - start the React UI:**
 ```bash
@@ -100,6 +100,7 @@ The first Hardhat account is the contract admin after local deployment. Use that
 SEPOLIA_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/YOUR_KEY_HERE
 PRIVATE_KEY=0xYOUR_METAMASK_PRIVATE_KEY_HERE
 ETHERSCAN_API_KEY=YOUR_ETHERSCAN_KEY_HERE
+VITE_PINATA_JWT=YOUR_PINATA_JWT_HERE
 ```
 
 Get a free RPC URL at [alchemy.com](https://alchemy.com).
@@ -113,11 +114,17 @@ npx hardhat run scripts/deploy.js --network sepolia
 
 **3. Update the UI contract settings:**
 
-In `src/EHealthUI.jsx`, update:
+In `src/config/contract.js`, update:
 
 ```js
 const CONTRACT_ADDRESS = "YOUR_DEPLOYED_SEPOLIA_CONTRACT_ADDRESS"; //0x3b9877cf1Af43755aEF91A1a3B9415229Eae41d0
 const SEPOLIA_CHAIN_ID = 11155111;
+```
+
+In `src/EHealthUI.jsx`, update:
+
+```js
+pinataJwt: "YOUR_PINATA_JWT",
 ```
 
 Then run the UI:
