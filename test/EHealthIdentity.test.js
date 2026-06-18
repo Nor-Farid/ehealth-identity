@@ -9,6 +9,7 @@ const { ethers } = require("hardhat");
 const makeDID     = (addr) => `did:ehealth:${addr.toLowerCase()}`;
 const DATA_HASH   = "QmXgZAuFXq91c7NXs4p3QqFDgimfEAnvPKMGdJtW7YVBJL";
 const DATA_HASH_2 = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG";
+const REGISTRATION_FEE = ethers.utils.parseEther("0.001");
 
 // Asserts a tx reverts (with optional error name check)
 async function shouldRevert(txPromise, errorName) {
@@ -106,7 +107,8 @@ describe("EHealthIdentity", function () {
     it("Patient can register a new identity and emits IdentityRegistered", async function () {
       await shouldEmit(
         contract.connect(patient1).registerIdentity(
-          makeDID(patient1.address), DATA_HASH, "Alice Tan", "A+"
+          makeDID(patient1.address), DATA_HASH, "Alice Tan", "A+",
+          { value: REGISTRATION_FEE }
         ),
         "IdentityRegistered"
       );
@@ -114,44 +116,44 @@ describe("EHealthIdentity", function () {
     });
 
     it("totalRegistered increments on registration", async function () {
-      await contract.connect(patient1).registerIdentity(makeDID(patient1.address), DATA_HASH, "Alice", "B+");
+      await contract.connect(patient1).registerIdentity(makeDID(patient1.address), DATA_HASH, "Alice", "B+", { value: REGISTRATION_FEE });
       const [reg] = await contract.getStats();
       expect(reg.toNumber()).to.equal(1);
     });
 
     it("Reverts on duplicate registration (same address)", async function () {
-      await contract.connect(patient1).registerIdentity(makeDID(patient1.address), DATA_HASH, "Alice", "B+");
+      await contract.connect(patient1).registerIdentity(makeDID(patient1.address), DATA_HASH, "Alice", "B+", { value: REGISTRATION_FEE });
       await shouldRevert(
-        contract.connect(patient1).registerIdentity(makeDID(patient1.address), DATA_HASH, "Alice", "B+"),
+        contract.connect(patient1).registerIdentity(makeDID(patient1.address), DATA_HASH, "Alice", "B+", { value: REGISTRATION_FEE }),
         "AlreadyRegistered"
       );
     });
 
     it("Reverts on duplicate DID (different address)", async function () {
       const sameDID = "did:ehealth:shared-did";
-      await contract.connect(patient1).registerIdentity(sameDID, DATA_HASH, "Alice", "B+");
+      await contract.connect(patient1).registerIdentity(sameDID, DATA_HASH, "Alice", "B+", { value: REGISTRATION_FEE });
       await shouldRevert(
-        contract.connect(patient2).registerIdentity(sameDID, DATA_HASH, "Bob", "O-"),
+        contract.connect(patient2).registerIdentity(sameDID, DATA_HASH, "Bob", "O-", { value: REGISTRATION_FEE }),
         "DIDTaken"
       );
     });
 
     it("Reverts with empty DID", async function () {
       await shouldRevert(
-        contract.connect(patient1).registerIdentity("", DATA_HASH, "Alice", "A+"),
+        contract.connect(patient1).registerIdentity("", DATA_HASH, "Alice", "A+", { value: REGISTRATION_FEE }),
         "InvalidDID"
       );
     });
 
     it("Reverts with empty dataHash", async function () {
       await shouldRevert(
-        contract.connect(patient1).registerIdentity(makeDID(patient1.address), "", "Alice", "A+"),
+        contract.connect(patient1).registerIdentity(makeDID(patient1.address), "", "Alice", "A+", { value: REGISTRATION_FEE }),
         "InvalidDataHash"
       );
     });
 
     it("getIdentity returns correct fields", async function () {
-      await contract.connect(patient1).registerIdentity(makeDID(patient1.address), DATA_HASH, "Alice", "A+");
+      await contract.connect(patient1).registerIdentity(makeDID(patient1.address), DATA_HASH, "Alice", "A+", { value: REGISTRATION_FEE });
       const id = await contract.getIdentity(patient1.address);
       expect(id.owner).to.equal(patient1.address);
       expect(id.did).to.equal(makeDID(patient1.address));
@@ -171,7 +173,7 @@ describe("EHealthIdentity", function () {
     beforeEach(async function () {
       await deploy();
       await contract.grantVerifier(verifier.address);
-      await contract.connect(patient1).registerIdentity(makeDID(patient1.address), DATA_HASH, "Alice", "A+");
+      await contract.connect(patient1).registerIdentity(makeDID(patient1.address), DATA_HASH, "Alice", "A+", { value: REGISTRATION_FEE });
     });
 
     it("Verifier can verify a registered patient and emits IdentityVerified", async function () {
@@ -214,7 +216,7 @@ describe("EHealthIdentity", function () {
   describe("updateDataHash()", function () {
     beforeEach(async function () {
       await deploy();
-      await contract.connect(patient1).registerIdentity(makeDID(patient1.address), DATA_HASH, "Alice", "A+");
+      await contract.connect(patient1).registerIdentity(makeDID(patient1.address), DATA_HASH, "Alice", "A+", { value: REGISTRATION_FEE });
     });
 
     it("Owner can update their data hash and emits IdentityUpdated", async function () {
@@ -246,7 +248,7 @@ describe("EHealthIdentity", function () {
     beforeEach(async function () {
       await deploy();
       await contract.grantVerifier(verifier.address);
-      await contract.connect(patient1).registerIdentity(makeDID(patient1.address), DATA_HASH, "Alice", "A+");
+      await contract.connect(patient1).registerIdentity(makeDID(patient1.address), DATA_HASH, "Alice", "A+", { value: REGISTRATION_FEE });
       await contract.connect(verifier).verifyIdentity(patient1.address);
     });
 
@@ -262,7 +264,7 @@ describe("EHealthIdentity", function () {
     });
 
     it("Cannot issue credential to unverified patient", async function () {
-      await contract.connect(patient2).registerIdentity(makeDID(patient2.address), DATA_HASH, "Bob", "O-");
+      await contract.connect(patient2).registerIdentity(makeDID(patient2.address), DATA_HASH, "Bob", "O-", { value: REGISTRATION_FEE });
       await shouldRevert(
         contract.connect(verifier).issueCredential(patient2.address, "Prescription", "QmHash", 0),
         "NotVerified"
@@ -294,7 +296,7 @@ describe("EHealthIdentity", function () {
   describe("deactivateIdentity()", function () {
     beforeEach(async function () {
       await deploy();
-      await contract.connect(patient1).registerIdentity(makeDID(patient1.address), DATA_HASH, "Alice", "A+");
+      await contract.connect(patient1).registerIdentity(makeDID(patient1.address), DATA_HASH, "Alice", "A+", { value: REGISTRATION_FEE });
     });
 
     it("Owner can deactivate their identity and emits IdentityDeactivated", async function () {
@@ -309,7 +311,7 @@ describe("EHealthIdentity", function () {
       const sharedDID = makeDID(patient1.address);
       await contract.connect(patient1).deactivateIdentity();
       // Should NOT revert
-      await contract.connect(patient2).registerIdentity(sharedDID, DATA_HASH, "Bob", "O-");
+      await contract.connect(patient2).registerIdentity(sharedDID, DATA_HASH, "Bob", "O-", { value: REGISTRATION_FEE });
       expect(await contract.isRegistered(patient2.address)).to.equal(true);
     });
 
@@ -334,7 +336,7 @@ describe("EHealthIdentity", function () {
     beforeEach(deploy);
 
     it("Resolves DID to correct address", async function () {
-      await contract.connect(patient1).registerIdentity(makeDID(patient1.address), DATA_HASH, "Alice", "A+");
+      await contract.connect(patient1).registerIdentity(makeDID(patient1.address), DATA_HASH, "Alice", "A+", { value: REGISTRATION_FEE });
       expect(await contract.resolveDID(makeDID(patient1.address))).to.equal(patient1.address);
     });
 
@@ -370,7 +372,7 @@ describe("EHealthIdentity", function () {
     });
 
     it("isVerified returns false for registered but unverified patient", async function () {
-      await contract.connect(patient1).registerIdentity(makeDID(patient1.address), DATA_HASH, "Alice", "A+");
+      await contract.connect(patient1).registerIdentity(makeDID(patient1.address), DATA_HASH, "Alice", "A+", { value: REGISTRATION_FEE });
       expect(await contract.isVerified(patient1.address)).to.equal(false);
     });
   });
@@ -381,8 +383,8 @@ describe("EHealthIdentity", function () {
 
     it("Tracks registered and verified counts correctly", async function () {
       await contract.grantVerifier(verifier.address);
-      await contract.connect(patient1).registerIdentity(makeDID(patient1.address), DATA_HASH, "Alice", "A+");
-      await contract.connect(patient2).registerIdentity(makeDID(patient2.address), DATA_HASH, "Bob",   "O-");
+      await contract.connect(patient1).registerIdentity(makeDID(patient1.address), DATA_HASH, "Alice", "A+", { value: REGISTRATION_FEE });
+      await contract.connect(patient2).registerIdentity(makeDID(patient2.address), DATA_HASH, "Bob",   "O-", { value: REGISTRATION_FEE });
 
       let [reg, ver] = await contract.getStats();
       expect(reg.toNumber()).to.equal(2);

@@ -72,6 +72,10 @@ contract EHealthIdentity is AccessControl, ReentrancyGuard {
 
     uint256 public totalRegistered;
     uint256 public totalVerified;
+    
+    // Fee management
+    uint256 public registrationFee = 0.001 ether; // ~$3 USD equivalent
+    uint256 public totalFeesCollected;
 
     // ─────────────────────────────────────────────
     // EVENTS
@@ -83,6 +87,7 @@ contract EHealthIdentity is AccessControl, ReentrancyGuard {
     event CredentialIssued  (address indexed patient, address indexed verifier, string credentialType);
     event VerifierGranted   (address indexed verifier, address indexed admin);
     event VerifierRevoked   (address indexed verifier, address indexed admin);
+    event RegistrationFeeCollected(address indexed patient, uint256 amount, uint256 timestamp);
 
     // ─────────────────────────────────────────────
     // ERRORS (cheaper than require strings)
@@ -97,6 +102,7 @@ contract EHealthIdentity is AccessControl, ReentrancyGuard {
     error InvalidDataHash();
     error CredentialExpired();
     error ZeroAddress();
+    error InsufficientPayment();
 
     // ─────────────────────────────────────────────
     // CONSTRUCTOR
@@ -137,14 +143,16 @@ contract EHealthIdentity is AccessControl, ReentrancyGuard {
      *   2. EFFECTS — update state
      *   3. INTERACTIONS — emit event (no external calls)
      */
+    //SECURITY: Payable function with fee validation prevents abuse and enables value transfer
     function registerIdentity(
         string calldata did,
         string calldata dataHash,
         string calldata fullName,
         string calldata bloodType
-    ) external nonReentrant {
+    ) external payable nonReentrant {
         // CHECKS
         if (_registered[msg.sender])          revert AlreadyRegistered();
+        if (msg.value < registrationFee)      revert InsufficientPayment();
         if (bytes(did).length == 0)           revert InvalidDID();
         if (_didToAddress[did] != address(0)) revert DIDTaken();
         if (bytes(dataHash).length == 0)      revert InvalidDataHash();
@@ -153,6 +161,7 @@ contract EHealthIdentity is AccessControl, ReentrancyGuard {
         _registered[msg.sender]  = true;
         _didToAddress[did]        = msg.sender;
         totalRegistered          += 1;
+        totalFeesCollected       += msg.value;
 
         _identities[msg.sender] = PatientIdentity({
             owner:        msg.sender,
@@ -167,12 +176,14 @@ contract EHealthIdentity is AccessControl, ReentrancyGuard {
 
         // INTERACTIONS
         emit IdentityRegistered(msg.sender, did, block.timestamp);
+        emit RegistrationFeeCollected(msg.sender, msg.value, block.timestamp);
     }
 
     /**
      * @notice Update the off-chain data hash (e.g. new IPFS CID after record update).
      * @dev Only the identity owner can update their own record.
      */
+    //SECURITY: nonReentrant guards against recursive calls
     function updateDataHash(string calldata newDataHash)
         external
         nonReentrant
@@ -217,6 +228,7 @@ contract EHealthIdentity is AccessControl, ReentrancyGuard {
      * @notice Mark a patient's identity as verified (e.g. hospital confirmed ID).
      * @dev Caller must have VERIFIER_ROLE.
      */
+    //SECURITY: Role-based access control (VERIFIER_ROLE) restricts verification to authorized parties
     function verifyIdentity(address patient)
         external
         nonReentrant
@@ -285,6 +297,17 @@ contract EHealthIdentity is AccessControl, ReentrancyGuard {
     function revokeVerifier(address verifier) external onlyRole(ADMIN_ROLE) {
         _revokeRole(VERIFIER_ROLE, verifier);
         emit VerifierRevoked(verifier, msg.sender);
+    }
+
+    //SECURITY: Admin-only withdrawal prevents unauthorized fund extraction
+    /**
+      * @notice Withdraw accumulated registration fees (admin only).
+      */
+    function withdrawFees() external onlyRole(ADMIN_ROLE) nonReentrant {
+        uint256 amount = totalFeesCollected;
+        totalFeesCollected = 0;
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, "Withdrawal failed");
     }
 
     // ─────────────────────────────────────────────
