@@ -1,8 +1,8 @@
 {
   "network": "sepolia",
-  "contractAddress": "0x3b9877cf1Af43755aEF91A1a3B9415229Eae41d0",
+  "contractAddress": "0x08668ca6e0bFC4D30aCf5561b6d7A3ae9997758F",
   "deployer": "0xd6A737eb47e8dABd0C229251A88aE5cF6db9D66a",
-  "deployedAt": "2026-06-16T14:32:19.015Z",
+  "deployedAt": "2026-06-18T16:08:02.404Z",
   "roles": {
     "ADMIN_ROLE": "0xa49807205ce4d355092ef5a8a18f56e8913cf4a201fbe287825b095693c21775",
     "VERIFIER_ROLE": "0x0ce23c3e399818cfee81a7ab0880f714e53d7672b08df0fa62f2843416e1ea09"

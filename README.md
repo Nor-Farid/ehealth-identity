@@ -117,7 +117,7 @@ npx hardhat run scripts/deploy.js --network sepolia
 In `src/config/contract.js`, update:
 
 ```js
-const CONTRACT_ADDRESS = "YOUR_DEPLOYED_SEPOLIA_CONTRACT_ADDRESS"; //0x3b9877cf1Af43755aEF91A1a3B9415229Eae41d0
+const CONTRACT_ADDRESS = "YOUR_DEPLOYED_SEPOLIA_CONTRACT_ADDRESS"; //0x08668ca6e0bFC4D30aCf5561b6d7A3ae9997758F
 const SEPOLIA_CHAIN_ID = 11155111;
 ```
 

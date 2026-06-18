@@ -1,6 +1,6 @@
 // src/config/contract.js
 
-export const CONTRACT_ADDRESS = "0x307ad01E8Ab300B71a28f1817CfCaEb0CB41473d";
+export const CONTRACT_ADDRESS = "0x08668ca6e0bFC4D30aCf5561b6d7A3ae9997758F";
 
 // Set this to 11155111 when you deploy to Sepolia!
 export const SEPOLIA_CHAIN_ID = 11155111; 
